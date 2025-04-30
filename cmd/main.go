@@ -25,7 +25,7 @@ func main() {
 			}
 
 			if !cli.IsAuthenticated(config) {
-				log.Println("You're not authenticated or you token has expired. Logging in...")
+				log.Println("You're not authenticated or your token has expired. Logging in...")
 				loginCmd := cli.NewLoginCmd()
 				loginCmd.SetArgs([]string{})
 				if err := loginCmd.Execute(); err != nil {

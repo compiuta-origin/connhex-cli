@@ -176,7 +176,7 @@ func NewLoginCmd() *cobra.Command {
 				return err
 			}
 
-			logOK(fmt.Sprintf("Login successful! You token is: %s", token))
+			logOK(fmt.Sprintf("Login successful! Your token is: %s", token))
 
 			return nil
 		},
