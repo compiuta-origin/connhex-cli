@@ -6,6 +6,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/compiuta-origin/connhex-cli/internal/config"
 	"github.com/compiuta-origin/connhex-cli/internal/sdk"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -23,7 +24,6 @@ func NewLoginCmd() *cobra.Command {
 	cmd := cobra.Command{
 		Use:   "login [connhex-instance user password]",
 		Short: "Login to Connhex instance",
-		// We use `RunE` beacause this command is used in the main PersistentPreRun
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var connhexInstance, user, password string
 
@@ -59,7 +59,7 @@ func NewLoginCmd() *cobra.Command {
 				return ErrInvalidInput
 			}
 
-			connhexInstance, err := sanitizeConnhexInstance(connhexInstance)
+			connhexInstance, err := config.SanitizeConnhexInstance(connhexInstance)
 			if err != nil {
 				return err
 			}
@@ -67,8 +67,7 @@ func NewLoginCmd() *cobra.Command {
 			// Initialize the SDK if needed, since the login command
 			// doesn't require authentication when first executed
 			if chxsdk == nil {
-				s := sdk.NewSDK(connhexInstance)
-				SetSDK(s)
+				SetSDK(sdk.NewSDK(connhexInstance))
 			}
 
 			token, err := chxsdk.Login(user, password)
@@ -76,14 +75,14 @@ func NewLoginCmd() *cobra.Command {
 				return err
 			}
 
-			config := Config{
+			cfg := config.Config{
 				ConnhexInstance: connhexInstance,
 				Token:           token,
 				User:            user,
 				ExpiresAt:       time.Now().Add(tokenExpirationTime),
 			}
 
-			if err := config.Save(); err != nil {
+			if err := config.Save(cfg); err != nil {
 				return err
 			}
 

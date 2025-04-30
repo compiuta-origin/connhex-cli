@@ -11,6 +11,7 @@ import (
 	"encoding/csv"
 	"strings"
 
+	"github.com/compiuta-origin/connhex-cli/internal/config"
 	"github.com/compiuta-origin/connhex-cli/internal/sdk"
 	"github.com/spf13/cobra"
 )
@@ -233,27 +234,27 @@ func getManufacturingData(devices []Device, connectables []sdk.Connectable, mdc 
 }
 
 func provisionDevices(devices []Device, mdc ManufacturingDeviceConfig) error {
-	config, err := LoadConfig()
+	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
 
 	provisionData := getProvisionData(devices)
-	provisionResult, err := chxsdk.BulkProvision(provisionData, config.Token)
+	provisionResult, err := chxsdk.BulkProvision(provisionData, cfg.Token)
 	if err != nil {
 		return err
 	}
 
 	manufacturingData := getManufacturingData(devices, provisionResult.Things, mdc)
 
-	if _, err := chxsdk.CreateResources(manufacturingData, "manufacturing", mdc.schema, config.Token); err != nil {
+	if _, err := chxsdk.CreateResources(manufacturingData, "manufacturing", mdc.schema, cfg.Token); err != nil {
 		ids := make([]string, len(provisionResult.Things))
 		for i := range ids {
 			ids[i] = provisionResult.Things[i].ID
 		}
 
 		// Ignoring unprovisioning errors
-		chxsdk.BulkUnprovision(ids, config.Token)
+		chxsdk.BulkUnprovision(ids, cfg.Token)
 
 		return err
 	}
