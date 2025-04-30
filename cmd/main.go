@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/compiuta-origin/connhex-cli/cli"
+	"github.com/compiuta-origin/connhex-cli/internal/sdk"
 	"github.com/spf13/cobra"
 )
 
@@ -24,14 +25,17 @@ func main() {
 				log.Fatal(err)
 			}
 
-			if !cli.IsAuthenticated(config) {
-				log.Println("You're not authenticated or your token has expired. Logging in...")
+			if !config.IsUserAuthenticated() {
+				log.Println("You're not authenticated or you token has expired. Logging in...")
 				loginCmd := cli.NewLoginCmd()
 				loginCmd.SetArgs([]string{})
 				if err := loginCmd.Execute(); err != nil {
 					log.Fatal(err)
 				}
 			}
+
+			s := sdk.NewSDK(config.ConnhexInstance)
+			cli.SetSDK(s)
 		},
 	}
 

@@ -1,11 +1,9 @@
 package cli
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -13,44 +11,68 @@ import (
 	"encoding/csv"
 	"strings"
 
+	"github.com/compiuta-origin/connhex-cli/internal/sdk"
 	"github.com/spf13/cobra"
 )
 
 const (
-	defDeviceManufacturingSchema = "devices"
-	jsonExt                      = ".json"
-	csvExt                       = ".csv"
+	defManufacturingDeviceSchema            = "devices"
+	defManufacturingDeviceSerialNumberField = "serial_number"
+	defManufacturingDeviceConnhexIdField    = "connhex_id"
+	jsonExt                                 = ".json"
+	csvExt                                  = ".csv"
 )
 
 var (
 	errNoDeviceToProvision     = errors.New("no device to provision")
-	errProvisionFailed         = errors.New("failed to provision connectables")
 	errCSVEmpty                = errors.New("CSV file must contain a header row and at least one data row")
 	errCSVMissingRequiredField = errors.New("missing required field")
 	errCSVReadError            = errors.New("error reading CSV file")
 )
 
-// DeviceManufacturing's properties depends on the user-defined schema
-type DeviceManufacturing map[string]interface{}
-
-type Connectable struct {
+type CLIProvisionData struct {
 	Name              string `json:"name,omitempty"`
 	InitId            string `json:"init_id"`
 	InitKey           string `json:"init_key"`
 	MigrationKey      string `json:"migration_key,omitempty"`
-	MigrationKeyQuota *int   `json:"migration_key_quota,omitempty"`
+	MigrationKeyQuota int    `json:"migration_key_quota,omitempty"`
 	Model             string `json:"model,omitempty"`
 }
 
-type ConnectableWithTenant struct {
-	Connectable
-	Tenant string `json:"tenant"`
+type Device struct {
+	// Manufacturing fields depends on the service schema
+	Manufacturing map[string]interface{} `json:"manufacturing"`
+	Provision     CLIProvisionData       `json:"provision"`
+	Tenant        string                 `json:"tenant"`
 }
 
-type Device struct {
-	DeviceManufacturing map[string]interface{} `json:"manufacturing"`
-	Connectable         Connectable            `json:"connectable"`
-	Tenant              string                 `json:"tenant"`
+type ManufacturingDeviceConfig struct {
+	schema            string
+	SerialNumberField string
+	ConnhexIdField    string
+}
+
+func (device *Device) toProvisionData() sdk.ProvisionData {
+	return sdk.ProvisionData{
+		Name:              device.Provision.Name,
+		InitId:            device.Provision.InitId,
+		InitKey:           device.Provision.InitKey,
+		MigrationKey:      device.Provision.MigrationKey,
+		MigrationKeyQuota: device.Provision.MigrationKeyQuota,
+		Model:             device.Provision.Model,
+		Tenant:            device.Tenant,
+	}
+}
+
+func (device *Device) toManufacturingData() sdk.Resource {
+	resource := sdk.Resource{}
+
+	for key, value := range device.Manufacturing {
+		resource[key] = value
+	}
+	resource["tenant"] = device.Tenant
+
+	return resource
 }
 
 func parseCSVDevices(file *os.File) ([]Device, error) {
@@ -74,7 +96,7 @@ func parseCSVDevices(file *os.File) ([]Device, error) {
 
 	for i, record := range records[1:] {
 		device := Device{
-			DeviceManufacturing: make(map[string]interface{}),
+			Manufacturing: make(map[string]interface{}),
 		}
 
 		for j, value := range record {
@@ -95,30 +117,30 @@ func parseCSVDevices(file *os.File) ([]Device, error) {
 				device.Tenant = value
 				continue
 			}
-			if strings.HasPrefix(colName, "connectable.") {
-				fieldName := strings.TrimPrefix(colName, "connectable.")
+			if strings.HasPrefix(colName, "provision.") {
+				fieldName := strings.TrimPrefix(colName, "provision.")
 				switch fieldName {
 				case "name":
-					device.Connectable.Name = value
+					device.Provision.Name = value
 				case "init_id":
-					device.Connectable.InitId = value
+					device.Provision.InitId = value
 				case "init_key":
-					device.Connectable.InitKey = value
+					device.Provision.InitKey = value
 				case "migration_key":
-					device.Connectable.MigrationKey = value
+					device.Provision.MigrationKey = value
 				case "migration_key_quota":
 					quota, err := strconv.Atoi(value)
 					if err == nil {
-						device.Connectable.MigrationKeyQuota = &quota
+						device.Provision.MigrationKeyQuota = quota
 					}
 				case "model":
-					device.Connectable.Model = value
+					device.Provision.Model = value
 				}
 				continue
 			}
 			if strings.HasPrefix(colName, "manufacturing.") {
 				fieldName := strings.TrimPrefix(colName, "manufacturing.")
-				device.DeviceManufacturing[fieldName] = value
+				device.Manufacturing[fieldName] = value
 			}
 		}
 
@@ -127,8 +149,8 @@ func parseCSVDevices(file *os.File) ([]Device, error) {
 			column string
 			field  string
 		}{
-			{"connectable.init_id", "InitId"},
-			{"connectable.init_key", "InitKey"},
+			{"provision.init_id", "InitId"},
+			{"provision.init_key", "InitKey"},
 			{"tenant", "Tenant"},
 		}
 
@@ -137,9 +159,9 @@ func parseCSVDevices(file *os.File) ([]Device, error) {
 
 			switch req.field {
 			case "InitId":
-				fieldValue = device.Connectable.InitId
+				fieldValue = device.Provision.InitId
 			case "InitKey":
-				fieldValue = device.Connectable.InitKey
+				fieldValue = device.Provision.InitKey
 			case "Tenant":
 				fieldValue = device.Tenant
 			}
@@ -182,184 +204,64 @@ func parseDeviceProvisioningFile(path string) ([]Device, error) {
 	return devices, nil
 }
 
-func getConnectablesData(devices []Device) []ConnectableWithTenant {
-	cwts := []ConnectableWithTenant{}
+func getProvisionData(devices []Device) []sdk.ProvisionData {
+	data := []sdk.ProvisionData{}
 
 	for _, device := range devices {
-		cwt := ConnectableWithTenant{
-			Connectable: device.Connectable,
-			Tenant:      device.Tenant,
-		}
-		cwts = append(cwts, cwt)
+		data = append(data, device.toProvisionData())
 	}
-
-	return cwts
+	return data
 }
 
-func provisionConnectables(connhexInstance string, cwts []ConnectableWithTenant) ([]string, error) {
-	body, err := json.Marshal(cwts)
-	if err != nil {
-		return nil, err
-	}
+func getManufacturingData(devices []Device, connectables []sdk.Connectable, mdc ManufacturingDeviceConfig) []sdk.Resource {
+	data := []sdk.Resource{}
 
-	reqURL := fmt.Sprintf("https://apis.%s/iot/provision/things/bulk", connhexInstance)
-	req, err := http.NewRequest("POST", reqURL, bytes.NewBuffer(body))
-	if err != nil {
-		return nil, err
-
-	}
-	req.Header.Add("Content-Type", "application/json")
-	if err := setAuthHeader(req); err != nil {
-		return nil, err
-	}
-
-	client := &http.Client{}
-	res, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer req.Body.Close()
-
-	statusCode := res.StatusCode
-	if statusCode < http.StatusOK || statusCode >= http.StatusBadRequest {
-		return nil, fmt.Errorf("error code %d from Connhex Provision service", statusCode)
-	}
-
-	provisionedConnectables := struct {
-		Things []struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
-			Key  string `json:"key"`
-		} `json:"things"`
-		Processed int `json:"processed"`
-		Failed    int `json:"failed"`
-	}{}
-	if err := json.NewDecoder(res.Body).Decode(&provisionedConnectables); err != nil {
-		return nil, err
-	}
-	if provisionedConnectables.Failed > 0 {
-		return nil, errProvisionFailed
-	}
-
-	ids := make([]string, len(provisionedConnectables.Things))
-	for i, thing := range provisionedConnectables.Things {
-		ids[i] = thing.ID
-	}
-
-	return ids, nil
-}
-
-func unprovisionConnectables(connhexInstance string, ids []string) error {
-	body, err := json.Marshal(ids)
-	if err != nil {
-		return err
-	}
-
-	reqURL := fmt.Sprintf("https://apis.%s/iot/provision/things/bulk", connhexInstance)
-	req, err := http.NewRequest("DELETE", reqURL, bytes.NewBuffer(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Add("Content-Type", "application/json")
-	if err = setAuthHeader(req); err != nil {
-		return err
-	}
-
-	client := &http.Client{}
-	res, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer req.Body.Close()
-
-	statusCode := res.StatusCode
-	if statusCode < http.StatusOK || statusCode >= http.StatusBadRequest {
-		return fmt.Errorf("error code %d from Connhex Provision service", statusCode)
-	}
-	return nil
-}
-
-func getManufacturingData(devices []Device) []DeviceManufacturing {
-	dms := []DeviceManufacturing{}
+	serialNumberField := mdc.SerialNumberField
+	connhexIdField := mdc.ConnhexIdField
 
 	for _, device := range devices {
-		dm := DeviceManufacturing{}
-
-		for k, v := range device.DeviceManufacturing {
-			dm[k] = v
+		manufacturing := device.toManufacturingData()
+		for _, connectable := range connectables {
+			if connectable.Metadata["init_id"] == manufacturing[serialNumberField] {
+				manufacturing[connhexIdField] = connectable.ID
+			}
 		}
-
-		dm["tenant"] = device.Tenant
-		dms = append(dms, dm)
+		data = append(data, manufacturing)
 	}
 
-	return dms
+	return data
 }
 
-func createManufacturingData(connhexInstance string, dwts []DeviceManufacturing, deviceManufacturingSchema string) error {
-	if deviceManufacturingSchema == "" {
-		deviceManufacturingSchema = defDeviceManufacturingSchema
-	}
-
-	// Convert map keys to camelcase: it is required from the manufacturing service when posting bulk requests
-	camelized := make([]map[string]interface{}, len(dwts))
-	for i := range camelized {
-		camelized[i] = ConvertMapKeysToCamelCase(dwts[i])
-	}
-
-	body, err := json.Marshal(camelized)
-	if err != nil {
-		return err
-	}
-
-	reqURL := fmt.Sprintf("https://apis.%s/manufacturing/%s", connhexInstance, deviceManufacturingSchema)
-	req, err := http.NewRequest("POST", reqURL, bytes.NewBuffer(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Add("Content-Type", "application/json")
-	if err = setAuthHeader(req); err != nil {
-		return err
-	}
-
-	client := &http.Client{}
-	res, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer req.Body.Close()
-
-	statusCode := res.StatusCode
-	if statusCode < http.StatusOK || statusCode >= http.StatusBadRequest {
-		return fmt.Errorf("error code %d from Connhex Manufacturing service", statusCode)
-	}
-
-	return nil
-}
-
-func provisionDevices(devices []Device, manufacturingSchema string) error {
+func provisionDevices(devices []Device, mdc ManufacturingDeviceConfig) error {
 	config, err := LoadConfig()
 	if err != nil {
 		return err
 	}
-	connhexInstance := config.ConnhexInstance
 
-	cwts := getConnectablesData(devices)
-	ids, err := provisionConnectables(connhexInstance, cwts)
+	provisionData := getProvisionData(devices)
+	provisionResult, err := chxsdk.BulkProvision(provisionData, config.Token)
 	if err != nil {
 		return err
 	}
 
-	dms := getManufacturingData(devices)
-	if err = createManufacturingData(connhexInstance, dms, manufacturingSchema); err != nil {
-		unprovisionConnectables(connhexInstance, ids)
+	manufacturingData := getManufacturingData(devices, provisionResult.Things, mdc)
+
+	if _, err := chxsdk.CreateResources(manufacturingData, "manufacturing", mdc.schema, config.Token); err != nil {
+		ids := make([]string, len(provisionResult.Things))
+		for i := range ids {
+			ids[i] = provisionResult.Things[i].ID
+		}
+
+		// Ignoring unprovisioning errors
+		chxsdk.BulkUnprovision(ids, config.Token)
+
 		return err
 	}
 
 	return nil
 }
 
-func provisionDevicesFromFile(path string, manufacturingSchema string) error {
+func provisionDevicesFromFile(path string, mdc ManufacturingDeviceConfig) error {
 	devices, err := parseDeviceProvisioningFile(path)
 	if err != nil {
 		return err
@@ -368,7 +270,7 @@ func provisionDevicesFromFile(path string, manufacturingSchema string) error {
 		return errNoDeviceToProvision
 	}
 
-	if err = provisionDevices(devices, manufacturingSchema); err != nil {
+	if err := provisionDevices(devices, mdc); err != nil {
 		return err
 	}
 
@@ -378,7 +280,9 @@ func provisionDevicesFromFile(path string, manufacturingSchema string) error {
 }
 
 func NewProvisionCmd() *cobra.Command {
-	var deviceManufacturingSchema string
+	var manufacturingDeviceSchema string
+	var manufacturingDeviceSerialNumberField string
+	var manufacturingDeviceConnhexIdField string
 
 	cmd := &cobra.Command{
 		Use:   "provision [--schema=<schema-name>] <filename>",
@@ -388,12 +292,12 @@ func NewProvisionCmd() *cobra.Command {
 CSV File Format:
 - The CSV file must have a header row defining the columns
 - Required columns:
-  * connectable.init_id - Device initialization ID
-  * connectable.init_key - Device initialization key
+  * provision.init_id - Device initialization ID
+  * provision.init_key - Device initialization key
 
-- Optional "tenant" column to specify the target tenant. If not provided, the device will be provisioned without any assigned tenant.
+- Optional "tenant" column to specify the target tenant. If not provided, devices will be provisioned without any assigned tenant.
 
-- Optional connectable columns use the prefix "connectable." followed by:
+- Optional provision columns use the prefix "provision." followed by:
   * name, model, migration_key, migration_key_quota
 
 - Custom manufacturing data columns use the prefix "manufacturing." followed by any field name
@@ -404,15 +308,25 @@ CSV File Format:
 				return
 			}
 
-			if err := provisionDevicesFromFile(args[0], deviceManufacturingSchema); err != nil {
+			mdc := ManufacturingDeviceConfig{
+				schema:            manufacturingDeviceSchema,
+				SerialNumberField: manufacturingDeviceSerialNumberField,
+				ConnhexIdField:    manufacturingDeviceConnhexIdField,
+			}
+
+			if err := provisionDevicesFromFile(args[0], mdc); err != nil {
 				logError(err)
 				return
 			}
 		},
 	}
 
-	cmd.Flags().StringVarP(&deviceManufacturingSchema, "schema", "s", defDeviceManufacturingSchema,
-		"Device manufacturing schema")
+	cmd.Flags().StringVar(&manufacturingDeviceSchema, "schema",
+		defManufacturingDeviceSchema, "Manufacturing device schema")
+	cmd.Flags().StringVar(&manufacturingDeviceSerialNumberField, "serial-number-field",
+		defManufacturingDeviceSerialNumberField, "Manufacturing device serial number field")
+	cmd.Flags().StringVar(&manufacturingDeviceConnhexIdField, "connhex-id-field",
+		defManufacturingDeviceConnhexIdField, "Manufacturing device Connhex ID field")
 
 	return cmd
 }

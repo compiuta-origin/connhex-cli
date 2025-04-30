@@ -32,6 +32,35 @@ func (c *Config) sanitize() error {
 	return nil
 }
 
+func (c *Config) Save() error {
+	if err := c.sanitize(); err != nil {
+		return err
+	}
+
+	configFile, err := getConfigFilePath()
+	if err != nil {
+		return err
+	}
+
+	configDir := filepath.Dir(configFile)
+
+	// Create config directory if it doesn't exist
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return err
+	}
+
+	data, err := json.Marshal(c)
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(configFile, data, 0600)
+}
+
+func (c *Config) IsUserAuthenticated() bool {
+	return c.Token != "" && time.Now().Before(c.ExpiresAt)
+}
+
 func getConfigFilePath() (string, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -61,31 +90,6 @@ func LoadConfig() (Config, error) {
 
 	err = json.Unmarshal(data, &config)
 	return config, err
-}
-
-func SaveConfig(config *Config) error {
-	if err := config.sanitize(); err != nil {
-		return err
-	}
-
-	configFile, err := getConfigFilePath()
-	if err != nil {
-		return err
-	}
-
-	configDir := filepath.Dir(configFile)
-
-	// Create config directory if it doesn't exist
-	if err := os.MkdirAll(configDir, 0755); err != nil {
-		return err
-	}
-
-	data, err := json.Marshal(config)
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(configFile, data, 0600)
 }
 
 func NewConfigCmd() *cobra.Command {
