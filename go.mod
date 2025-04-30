@@ -1,4 +1,4 @@
-module github.com/compiuta-origin/connhex
+module github.com/compiuta-origin/connhex-cli
 
 go 1.24
 

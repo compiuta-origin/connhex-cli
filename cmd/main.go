@@ -4,7 +4,7 @@ import (
 	"log"
 	"slices"
 
-	"github.com/compiuta-origin/connhex/cli"
+	"github.com/compiuta-origin/connhex-cli/cli"
 	"github.com/spf13/cobra"
 )
 
