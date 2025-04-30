@@ -28,8 +28,8 @@ Connhex CLI allows you to interact with your Connhex Cloud instance directly fro
 
 ## Getting Started
 
-> [!NOTE]  
-> This guide assumes the `connhex-cli` binary is globally available (i.e. stored in a directory that has been added to your `PATH`. Common choices are `/usr/local/bin` or a custom directory like `~/bin`.)
+> [!NOTE]
+> This guide assumes the `connhex-cli` binary is globally available (i.e. stored in a directory that has been added to your `PATH`. Common choices are `/usr/local/bin` or a custom directory like `~/.bin`.)
 
 If this is not your case, navigate to the folder containing the `connhex-cli` binary. You will then be able to execute all of the commands below by replacing `connhex-cli` with `./connhex-cli`.
 
@@ -72,66 +72,71 @@ This will display your Connhex instance, authentication token, and other setting
 You can [provision](https://connhex.com/docs/api/core/provision/provision-a-connectable?utm_campaign=content&utm_medium=web&utm_source=github&utm_content=connhex+cli) multiple devices at once using a CSV or JSON file:
 
 ```bash
-connhex-cli provision [--schema=<schema-name>] <filename>
+connhex-cli provision [--schema=<schema-name>] [--serial-number-field=<field-name>] [--connhex-id-field=<field-name>] <filename>
 ```
 
-#### CSV Format
+#### Flags
+
+- `--schema`
+  Manufacturing device schema to use (default: `devices`).
+
+- `--serial-number-field`
+  Manufacturing device serial number field (default: `serial_number`).
+
+- `--connhex-id-field`
+  Manufacturing device Connhex ID field (default: `connhex_id`).
+
+#### File Formats
+
+Both CSV and JSON formats are supported.
+
+##### CSV Format
 
 CSV files must have a header row with the following required columns:
 
-- `tenant` - Target tenant for the device
-- `connectable.init_id` - Device initialization ID (typically the serial number)
-- `connectable.init_key` - Device initialization key
+- `provision.init_id` - Device initialization ID (typically the serial number)
+- `provision.init_key` - Device initialization key
 
-Optional connectable columns are:
+The `tenant` column is optional; if omitted, devices will be provisioned without a tenant.
 
-- `connectable.name` - Device name
-- `connectable.model` - Device model
-- `connectable.migration_key` - Alternative key used by the device to download its configuration if the main key is not available.
-- `connectable.migration_key_quota` - The number of times the migration key can be used.
+Optional provision columns are:
+
+- `provision.name` - Device name
+- `provision.model` - Device model
+- `provision.migration_key` - Alternative key used by the device to download its configuration if the main key is not available.
+- `provision.migration_key_quota` - The number of times the migration key can be used.
 
 All custom [manufacturing](https://connhex.com/docs/manufacturing/intro?utm_campaign=content&utm_medium=web&utm_source=github&utm_content=connhex+cli) data columns use the prefix `manufacturing.` followed by the field name. These will depend on your Connhex Manufacturing [configuration](https://connhex.com/docs/manufacturing/default-configuration?utm_campaign=content&utm_medium=web&utm_source=github&utm_content=connhex+cli):
 
 - `manufacturing.serial_number`
-- `manufacturing.hw_version`
 - etc.
 
 Example CSV file:
 
 ```csv
-tenant,connectable.init_id,connectable.init_key,connectable.name,manufacturing.serial_number
-connhex,device123,SN123456789,Sensor 1,SN123456789
-connhex,device124,SN123456790,Sensor 2,SN123456790
+tenant,provision.init_id,provision.init_key,provision.name,manufacturing.serial_number
+connhex,SN123456789,f1d1fa88-3da4-46db-b0c4-f003d4594cc8,Sensor 1,SN123456789
+connhex,SN123456790,cc8d42e1-063c-48aa-8fd8-1f983b4f2b54,Sensor 2,SN123456790
 ```
 
-#### JSON Format
+##### JSON Format
 
-Alternatively, you can use a JSON file with the following structure:
+The JSON file should contain an array of device objects:
 
 ```json
 [
   {
     "tenant": "connhex",
-    "connectable": {
+    "provision": {
       "name": "Sensor 1",
       "init_id": "SN123456789",
-      "init_key": "8f8b7361-3380-4dbe-9cfd-7d5a4d6eb167",
-      "model": "sensor-v1"
+      "init_key": "f1d1fa88-3da4-46db-b0c4-f003d4594cc8"
     },
     "manufacturing": {
-      "serial_number": "SN123456789",
-      "hw_version": "1.0"
+      "serial_number": "SN123456789"
     }
   }
 ]
-```
-
-#### Manufacturing Schema
-
-By default, the CLI uses the `devices` schema for manufacturing data. You can specify a different schema using the `--schema` flag:
-
-```bash
-connhex-cli provision --schema=custom-schema devices.csv
 ```
 
 ## Configuration
@@ -145,7 +150,7 @@ The Connhex CLI stores its configuration in `~/.connhex/config.json`. This inclu
 
 ## Troubleshooting
 
-_I'm getting the following error: `error: failed to provision connectables`_
+_I'm getting the following error: `error: failed to create entity`_
 
 Make sure all fields in your `devices` CSV file are valid: common errors include specifying tenants or models that don't exist.
 
