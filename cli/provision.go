@@ -49,8 +49,8 @@ type Device struct {
 
 type ManufacturingDeviceConfig struct {
 	schema            string
-	SerialNumberField string
-	ConnhexIdField    string
+	serialNumberField string
+	connhexIdField    string
 }
 
 func (device *Device) toProvisionData() sdk.ProvisionData {
@@ -217,8 +217,8 @@ func getProvisionData(devices []Device) []sdk.ProvisionData {
 func getManufacturingData(devices []Device, connectables []sdk.Connectable, mdc ManufacturingDeviceConfig) []sdk.Resource {
 	data := []sdk.Resource{}
 
-	serialNumberField := mdc.SerialNumberField
-	connhexIdField := mdc.ConnhexIdField
+	serialNumberField := mdc.serialNumberField
+	connhexIdField := mdc.connhexIdField
 
 	for _, device := range devices {
 		manufacturing := device.toManufacturingData()
@@ -311,8 +311,8 @@ CSV File Format:
 
 			mdc := ManufacturingDeviceConfig{
 				schema:            manufacturingDeviceSchema,
-				SerialNumberField: manufacturingDeviceSerialNumberField,
-				ConnhexIdField:    manufacturingDeviceConnhexIdField,
+				serialNumberField: manufacturingDeviceSerialNumberField,
+				connhexIdField:    manufacturingDeviceConnhexIdField,
 			}
 
 			if err := provisionDevicesFromFile(args[0], mdc); err != nil {
