@@ -1,18 +1,18 @@
 package cli
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
-
-	"encoding/csv"
 	"strings"
 
 	"github.com/compiuta-origin/connhex-cli/internal/config"
 	"github.com/compiuta-origin/connhex-cli/internal/sdk"
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
@@ -29,7 +29,36 @@ var (
 	errCSVEmpty                = errors.New("CSV file must contain a header row and at least one data row")
 	errCSVMissingRequiredField = errors.New("missing required field")
 	errCSVReadError            = errors.New("error reading CSV file")
+	errInvalidFieldValue       = errors.New("invalid field value")
 )
+
+func isValidUUID(s string) bool {
+	_, err := uuid.Parse(s)
+	return err == nil
+}
+
+func applyDefaults(devices []Device) {
+	for i := range devices {
+		if devices[i].Provision.InitKey == "" {
+			devices[i].Provision.InitKey = uuid.New().String()
+		}
+	}
+}
+
+func validateDevices(devices []Device, serialNumberField string) error {
+	for i, device := range devices {
+		if device.Provision.InitId == "" {
+			return fmt.Errorf("row %d: %w 'provision.init_id'", i+1, errCSVMissingRequiredField)
+		}
+		if device.Provision.Model != "" && !isValidUUID(device.Provision.Model) {
+			return fmt.Errorf("row %d: %w: 'provision.model' must be a valid UUID", i+1, errInvalidFieldValue)
+		}
+		if _, ok := device.Manufacturing[serialNumberField]; ok {
+			return fmt.Errorf("row %d: %w: 'manufacturing.%s' must not be specified — it is automatically set from 'provision.init_id'", i+1, errInvalidFieldValue, serialNumberField)
+		}
+	}
+	return nil
+}
 
 type CLIProvisionData struct {
 	Name              string `json:"name,omitempty"`
@@ -71,7 +100,9 @@ func (device *Device) toManufacturingData() sdk.Resource {
 	for key, value := range device.Manufacturing {
 		resource[key] = value
 	}
-	resource["tenant"] = device.Tenant
+	if device.Tenant != "" {
+		resource["tenants"] = []string{device.Tenant}
+	}
 
 	return resource
 }
@@ -95,7 +126,7 @@ func parseCSVDevices(file *os.File) ([]Device, error) {
 		header[i] = strings.TrimSpace(header[i])
 	}
 
-	for i, record := range records[1:] {
+	for _, record := range records[1:] {
 		device := Device{
 			Manufacturing: make(map[string]interface{}),
 		}
@@ -145,40 +176,13 @@ func parseCSVDevices(file *os.File) ([]Device, error) {
 			}
 		}
 
-		// Validate required fields
-		requiredFields := []struct {
-			column string
-			field  string
-		}{
-			{"provision.init_id", "InitId"},
-			{"provision.init_key", "InitKey"},
-			{"tenant", "Tenant"},
-		}
-
-		for _, req := range requiredFields {
-			var fieldValue string
-
-			switch req.field {
-			case "InitId":
-				fieldValue = device.Provision.InitId
-			case "InitKey":
-				fieldValue = device.Provision.InitKey
-			case "Tenant":
-				fieldValue = device.Tenant
-			}
-
-			if fieldValue == "" {
-				return devices, fmt.Errorf("row %d: %w '%s'", i+2, errCSVMissingRequiredField, req.column)
-			}
-		}
-
 		devices = append(devices, device)
 	}
 
 	return devices, nil
 }
 
-func parseDeviceProvisioningFile(path string) ([]Device, error) {
+func parseDeviceProvisioningFile(path string, serialNumberField string) ([]Device, error) {
 	devices := []Device{}
 
 	if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -193,16 +197,18 @@ func parseDeviceProvisioningFile(path string) ([]Device, error) {
 
 	switch filepath.Ext(path) {
 	case csvExt:
-		return parseCSVDevices(file)
+		devices, err = parseCSVDevices(file)
 	case jsonExt:
-		if err := json.NewDecoder(file).Decode(&devices); err != nil {
-			return devices, err
-		}
+		err = json.NewDecoder(file).Decode(&devices)
 	default:
 		return devices, nil
 	}
 
-	return devices, nil
+	if err != nil {
+		return devices, err
+	}
+	applyDefaults(devices)
+	return devices, validateDevices(devices, serialNumberField)
 }
 
 func getProvisionData(devices []Device) []sdk.ProvisionData {
@@ -222,8 +228,9 @@ func getManufacturingData(devices []Device, connectables []sdk.Connectable, mdc 
 
 	for _, device := range devices {
 		manufacturing := device.toManufacturingData()
+		manufacturing[serialNumberField] = device.Provision.InitId
 		for _, connectable := range connectables {
-			if connectable.Metadata["init_id"] == manufacturing[serialNumberField] {
+			if connectable.Metadata["init_id"] == device.Provision.InitId {
 				manufacturing[connhexIdField] = connectable.ID
 			}
 		}
@@ -252,8 +259,6 @@ func provisionDevices(devices []Device, mdc ManufacturingDeviceConfig) error {
 		for i := range ids {
 			ids[i] = provisionResult.Things[i].ID
 		}
-
-		// Ignoring unprovisioning errors
 		chxsdk.BulkUnprovision(ids, cfg.Token)
 
 		return err
@@ -263,7 +268,7 @@ func provisionDevices(devices []Device, mdc ManufacturingDeviceConfig) error {
 }
 
 func provisionDevicesFromFile(path string, mdc ManufacturingDeviceConfig) error {
-	devices, err := parseDeviceProvisioningFile(path)
+	devices, err := parseDeviceProvisioningFile(path, mdc.serialNumberField)
 	if err != nil {
 		return err
 	}
@@ -293,16 +298,19 @@ func NewProvisionCmd() *cobra.Command {
 CSV File Format:
 - The CSV file must have a header row defining the columns
 - Required columns:
-  * provision.init_id - Device initialization ID
-  * provision.init_key - Device initialization key
+  * provision.init_id - Device initialization ID (typically the device serial number)
 
-- Optional "tenant" column to specify the target tenant. If not provided, devices will be provisioned without any assigned tenant.
+- Optional columns:
+  * provision.init_key - Device initialization key (auto-generated UUID v4 if not provided)
+  * tenant            - Target tenant. If not provided, devices are provisioned without an assigned tenant.
 
 - Optional provision columns use the prefix "provision." followed by:
-  * name, model, migration_key, migration_key_quota
+  * name, model (must be a valid model ID), migration_key, migration_key_quota
 
 - Custom manufacturing data columns use the prefix "manufacturing." followed by any field name
-  Example: manufacturing.serial_number, manufacturing.hw_version`,
+  Example: manufacturing.hw_version
+
+Note: the serial number field in the manufacturing record is always populated from provision.init_id.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) != 1 {
 				logUsage(cmd.Use)
