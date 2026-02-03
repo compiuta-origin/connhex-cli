@@ -92,31 +92,30 @@ Both CSV and JSON formats are supported.
 
 ##### CSV Format
 
-CSV files must have a header row with the following required columns:
+CSV files must have a header row. The only required column is:
 
-- `provision.init_id` - Device initialization ID (typically the serial number)
-- `provision.init_key` - Device initialization key
+- `provision.init_id` - Device initialization ID (typically the device serial number)
 
-The `tenant` column is optional; if omitted, devices will be provisioned without a tenant.
+Optional columns:
 
-Optional provision columns are:
-
-- `provision.name` - Device name
-- `provision.model` - Device model
+- `provision.init_key` - Device initialization key. If omitted, a UUID v4 is generated automatically.
+- `tenant` - Target tenant. If omitted, devices are provisioned without a tenant.
+- `provision.name` - Device name.
+- `provision.model` - Device model (must be a valid UUID).
 - `provision.migration_key` - Alternative key used by the device to download its configuration if the main key is not available.
 - `provision.migration_key_quota` - The number of times the migration key can be used.
 
-All custom [manufacturing](https://connhex.com/docs/manufacturing/intro?utm_campaign=content&utm_medium=web&utm_source=github&utm_content=connhex+cli) data columns use the prefix `manufacturing.` followed by the field name. These will depend on your Connhex Manufacturing [configuration](https://connhex.com/docs/manufacturing/default-configuration?utm_campaign=content&utm_medium=web&utm_source=github&utm_content=connhex+cli):
+All custom [manufacturing](https://connhex.com/docs/manufacturing/intro?utm_campaign=content&utm_medium=web&utm_source=github&utm_content=connhex+cli) data columns use the prefix `manufacturing.` followed by the field name. These will depend on your Connhex Manufacturing [configuration](https://connhex.com/docs/manufacturing/default-configuration?utm_campaign=content&utm_medium=web&utm_source=github&utm_content=connhex+cli).
 
-- `manufacturing.serial_number`
-- etc.
+> [!NOTE]
+> The serial number field in the manufacturing record (default: `serial_number`) is always set automatically from `provision.init_id`. Do not include it as a `manufacturing.*` column.
 
 Example CSV file:
 
 ```csv
-tenant,provision.init_id,provision.init_key,provision.name,manufacturing.serial_number
-connhex,SN123456789,f1d1fa88-3da4-46db-b0c4-f003d4594cc8,Sensor 1,SN123456789
-connhex,SN123456790,cc8d42e1-063c-48aa-8fd8-1f983b4f2b54,Sensor 2,SN123456790
+tenant,provision.init_id,provision.init_key,provision.name
+connhex,SN123456789,f1d1fa88-3da4-46db-b0c4-f003d4594cc8,Sensor 1
+connhex,SN123456790,cc8d42e1-063c-48aa-8fd8-1f983b4f2b54,Sensor 2
 ```
 
 ##### JSON Format
@@ -132,9 +131,7 @@ The JSON file should contain an array of device objects:
       "init_id": "SN123456789",
       "init_key": "f1d1fa88-3da4-46db-b0c4-f003d4594cc8"
     },
-    "manufacturing": {
-      "serial_number": "SN123456789"
-    }
+    "manufacturing": {}
   }
 ]
 ```
