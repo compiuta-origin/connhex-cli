@@ -46,6 +46,8 @@ func applyDefaults(devices []Device) {
 }
 
 func validateDevices(devices []Device, serialNumberField string) error {
+	seenInitId := make(map[string]int, len(devices))
+	seenInitKey := make(map[string]int, len(devices))
 	for i, device := range devices {
 		if device.Provision.InitId == "" {
 			return fmt.Errorf("row %d: %w 'provision.init_id'", i+1, errCSVMissingRequiredField)
@@ -56,6 +58,14 @@ func validateDevices(devices []Device, serialNumberField string) error {
 		if _, ok := device.Manufacturing[serialNumberField]; ok {
 			return fmt.Errorf("row %d: %w: 'manufacturing.%s' must not be specified — it is automatically set from 'provision.init_id'", i+1, errInvalidFieldValue, serialNumberField)
 		}
+		if firstRow, dup := seenInitId[device.Provision.InitId]; dup {
+			return fmt.Errorf("row %d: %w: 'provision.init_id' %q already used at row %d", i+1, errInvalidFieldValue, device.Provision.InitId, firstRow)
+		}
+		seenInitId[device.Provision.InitId] = i + 1
+		if firstRow, dup := seenInitKey[device.Provision.InitKey]; dup {
+			return fmt.Errorf("row %d: %w: 'provision.init_key' %q already used at row %d", i+1, errInvalidFieldValue, device.Provision.InitKey, firstRow)
+		}
+		seenInitKey[device.Provision.InitKey] = i + 1
 	}
 	return nil
 }

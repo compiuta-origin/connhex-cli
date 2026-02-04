@@ -152,6 +152,28 @@ func TestValidateDevices_SerialNumberFieldRejected(t *testing.T) {
 	}
 }
 
+func TestValidateDevices_DuplicateInitKey(t *testing.T) {
+	f := writeTempCSV(t, "provision.init_id,provision.init_key\ndev-001,same-key\ndev-002,same-key\n")
+	devices, err := parseCSVDevices(f)
+	if err != nil {
+		t.Fatalf("unexpected parse error: %v", err)
+	}
+	if err := validateDevices(devices, defManufacturingDeviceSerialNumberField); err == nil {
+		t.Fatal("expected error for duplicate provision.init_key")
+	}
+}
+
+func TestValidateDevices_DuplicateInitId(t *testing.T) {
+	f := writeTempCSV(t, "provision.init_id\ndev-001\ndev-001\n")
+	devices, err := parseCSVDevices(f)
+	if err != nil {
+		t.Fatalf("unexpected parse error: %v", err)
+	}
+	if err := validateDevices(devices, defManufacturingDeviceSerialNumberField); err == nil {
+		t.Fatal("expected error for duplicate provision.init_id")
+	}
+}
+
 func TestValidateDevices_MissingInitId(t *testing.T) {
 	err := validateDevices([]Device{{}}, defManufacturingDeviceSerialNumberField)
 	if err == nil {
